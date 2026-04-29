@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { auth, provider, db } from "./firebase";
-import { signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged, getRedirectResult } from "firebase/auth";
+import { auth, db } from "./firebase";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 
 const PRESET_EXERCISES = [
@@ -21,6 +21,12 @@ function fmtTime(sec) { return `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`; 
 function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState("login"); // login | register
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+
   const [sessions, setSessions] = useState([]);
   const [view, setView] = useState("log");
   const [currentSession, setCurrentSession] = useState(null);
@@ -53,20 +59,11 @@ function App() {
   };
 
   useEffect(() => {
-    getRedirectResult(auth).then(async (result) => {
-      if (result && result.user) {
-        await loadSessions(result.user.uid);
-      }
-    }).catch(() => {});
-
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setAuthLoading(false);
-      if (u) {
-        await loadSessions(u.uid);
-      } else {
-        setSessions([]);
-      }
+      if (u) await loadSessions(u.uid);
+      else setSessions([]);
     });
     return unsub;
   }, []);
@@ -81,12 +78,26 @@ function App() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
-  async function handleLogin() {
-    try { 
-      await signInWithPopup(auth, provider); 
-    } catch (e) { 
-      console.error(e.code, e.message); 
+  async function handleAuth() {
+    setAuthError(""); setAuthBusy(true);
+    try {
+      if (authMode === "register") {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (e) {
+      const msgs = {
+        "auth/email-already-in-use": "Email already registered.",
+        "auth/invalid-email": "Invalid email address.",
+        "auth/weak-password": "Password must be at least 6 characters.",
+        "auth/user-not-found": "No account found with this email.",
+        "auth/wrong-password": "Incorrect password.",
+        "auth/invalid-credential": "Incorrect email or password.",
+      };
+      setAuthError(msgs[e.code] || "Something went wrong. Try again.");
     }
+    setAuthBusy(false);
   }
 
   async function handleLogout() {
@@ -96,10 +107,7 @@ function App() {
   useEffect(() => {
     if (timerRunning && timerLeft > 0) {
       intervalRef.current = setInterval(() => {
-        setTimerLeft(t => {
-          if (t <= 1) { clearInterval(intervalRef.current); setTimerRunning(false); return 0; }
-          return t - 1;
-        });
+        setTimerLeft(t => { if (t <= 1) { clearInterval(intervalRef.current); setTimerRunning(false); return 0; } return t - 1; });
       }, 1000);
     }
     return () => clearInterval(intervalRef.current);
@@ -112,10 +120,7 @@ function App() {
   useEffect(() => {
     if (cdRunning && cdLeft > 0) {
       cdRef.current = setInterval(() => {
-        setCdLeft(t => {
-          if (t <= 1) { clearInterval(cdRef.current); setCdRunning(false); return 0; }
-          return t - 1;
-        });
+        setCdLeft(t => { if (t <= 1) { clearInterval(cdRef.current); setCdRunning(false); return 0; } return t - 1; });
       }, 1000);
     }
     return () => clearInterval(cdRef.current);
@@ -200,15 +205,42 @@ function App() {
   );
 
   if (!user) return (
-    <div style={{ fontFamily: "'DM Mono', monospace", background: "#0d0d0d", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#f0f0f0" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');`}</style>
-      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 48, letterSpacing: "0.1em", marginBottom: 8 }}>IRON LOG</div>
-      <div style={{ fontSize: 10, color: "#333", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 48 }}>Workout Tracker</div>
-      <button onClick={handleLogin} style={{ display: "flex", alignItems: "center", gap: 12, background: "#141414", border: "1px solid #2a2a2a", color: "#f0f0f0", fontFamily: "'DM Mono', monospace", fontSize: 12, letterSpacing: "0.08em", padding: "14px 28px", borderRadius: "4px", cursor: "pointer" }}>
-        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
-        Sign in with Google
-      </button>
-      <div style={{ fontSize: 10, color: "#222", marginTop: 24, letterSpacing: "0.08em" }}>Your data is private and encrypted</div>
+    <div style={{ fontFamily: "'DM Mono', monospace", background: "#0d0d0d", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#f0f0f0", padding: "20px" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
+        * { box-sizing: border-box; }
+        input { background: #1a1a1a; border: 1px solid #2a2a2a; color: #f0f0f0; font-family: 'DM Mono', monospace; font-size: 13px; padding: 10px 14px; border-radius: 4px; width: 100%; outline: none; transition: border 0.2s; }
+        input:focus { border-color: #e8ff4a; }
+      `}</style>
+      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 48, letterSpacing: "0.1em", marginBottom: 6 }}>IRON LOG</div>
+      <div style={{ fontSize: 10, color: "#333", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 40 }}>Workout Tracker</div>
+
+      <div style={{ width: "100%", maxWidth: 340 }}>
+        <div style={{ display: "flex", marginBottom: 24, borderBottom: "1px solid #1e1e1e" }}>
+          {["login","register"].map(m => (
+            <button key={m} onClick={() => { setAuthMode(m); setAuthError(""); }} style={{ flex: 1, background: "none", border: "none", color: authMode === m ? "#e8ff4a" : "#444", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", padding: "10px", cursor: "pointer", borderBottom: authMode === m ? "1px solid #e8ff4a" : "1px solid transparent", marginBottom: "-1px" }}>
+              {m === "login" ? "Sign In" : "Register"}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 5 }}>Email</div>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e => e.key === "Enter" && handleAuth()} />
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 5 }}>Password</div>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleAuth()} />
+        </div>
+
+        {authError && <div style={{ fontSize: 11, color: "#ff4a4a", marginBottom: 14, textAlign: "center" }}>{authError}</div>}
+
+        <button onClick={handleAuth} disabled={authBusy} style={{ width: "100%", background: "#e8ff4a", color: "#0d0d0d", border: "none", padding: "12px", fontSize: 12, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", borderRadius: "3px", cursor: "pointer", opacity: authBusy ? 0.6 : 1 }}>
+          {authBusy ? "Please wait…" : authMode === "login" ? "Sign In" : "Create Account"}
+        </button>
+
+        <div style={{ fontSize: 10, color: "#222", marginTop: 20, textAlign: "center", letterSpacing: "0.08em" }}>Your data is private and encrypted</div>
+      </div>
     </div>
   );
 
@@ -271,10 +303,7 @@ function App() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 14 }}>
           <div>
             <div className="header-title">IRON LOG</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-              <img src={user.photoURL} alt="" style={{ width: 16, height: 16, borderRadius: "50%" }} />
-              <span style={{ fontSize: 10, color: "#444", letterSpacing: "0.1em" }}>{user.displayName}</span>
-            </div>
+            <div style={{ fontSize: 10, color: "#444", letterSpacing: "0.1em", marginTop: 2 }}>{user.email}</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {!currentSession
