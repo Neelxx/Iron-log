@@ -48,31 +48,31 @@ function App() {
 
   // Auth listener + handle redirect result
   useEffect(() => {
-    getRedirectResult(auth).catch(() => {});
-
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      setAuthLoading(false);
-      if (u) {
+    getRedirectResult(auth).then(async (result) => {
+      if (result?.user) {
         try {
-          const ref = doc(db, "users", u.uid, "data", "sessions");
+          const ref = doc(db, "users", result.user.uid, "data", "sessions");
           const snap = await getDoc(ref);
           if (snap.exists()) setSessions(snap.data().list || []);
         } catch {}
-      } else {
-        setSessions([]);
       }
-    });
-    return unsub;
-  }, []);
+    }).catch(() => {});
 
-  const persist = useCallback(async (s, u) => {
-    if (!u) return;
-    try {
-      const ref = doc(db, "users", u.uid, "data", "sessions");
-      await setDoc(ref, { list: s });
-    } catch {}
-  }, []);
+  const unsub = onAuthStateChanged(auth, async (u) => {
+    setUser(u);
+    setAuthLoading(false);
+    if (u) {
+      try {
+        const ref = doc(db, "users", u.uid, "data", "sessions");
+        const snap = await getDoc(ref);
+        if (snap.exists()) setSessions(snap.data().list || []);
+      } catch {}
+    } else {
+      setSessions([]);
+    }
+  });
+  return unsub;
+}, []);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
