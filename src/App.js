@@ -21,7 +21,7 @@ function fmtTime(sec) { return `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`; 
 function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [authMode, setAuthMode] = useState("login"); // login | register
+  const [authMode, setAuthMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -31,17 +31,13 @@ function App() {
   const [view, setView] = useState("log");
   const [currentSession, setCurrentSession] = useState(null);
   const [sets, setSets] = useState([]);
-  const [form, setForm] = useState({ exercise: "", sets: "", reps: "", weight: "", rest: "", notes: "" });
+  const [form, setForm] = useState({ exercise: "", sets: "", reps: "", weight: "", rest: "", rpe: "", notes: "" });
   const [customExercise, setCustomExercise] = useState("");
   const [graphExercise, setGraphExercise] = useState("");
   const [graphType, setGraphType] = useState("weight");
   const [toast, setToast] = useState("");
 
-  const [timerTotal, setTimerTotal] = useState(0);
-  const [timerLeft, setTimerLeft] = useState(0);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const intervalRef = useRef(null);
-
+  // Independent countdown timer only
   const [cdMinutes, setCdMinutes] = useState("");
   const [cdSeconds, setCdSeconds] = useState("");
   const [cdTotal, setCdTotal] = useState(0);
@@ -104,19 +100,7 @@ function App() {
     try { await signOut(auth); setSessions([]); } catch {}
   }
 
-  useEffect(() => {
-    if (timerRunning && timerLeft > 0) {
-      intervalRef.current = setInterval(() => {
-        setTimerLeft(t => { if (t <= 1) { clearInterval(intervalRef.current); setTimerRunning(false); return 0; } return t - 1; });
-      }, 1000);
-    }
-    return () => clearInterval(intervalRef.current);
-  }, [timerRunning]); // eslint-disable-line
-
-  function startRestTimer(seconds) { clearInterval(intervalRef.current); setTimerTotal(seconds); setTimerLeft(seconds); setTimerRunning(true); }
-  function toggleRestTimer() { if (timerLeft === 0) return; setTimerRunning(r => !r); }
-  function resetRestTimer() { clearInterval(intervalRef.current); setTimerRunning(false); setTimerLeft(timerTotal); }
-
+  // Countdown timer tick
   useEffect(() => {
     if (cdRunning && cdLeft > 0) {
       cdRef.current = setInterval(() => {
@@ -139,9 +123,6 @@ function App() {
   const cdProgress = cdTotal > 0 ? cdLeft / cdTotal : 0;
   const cdDone = cdStarted && cdLeft === 0;
   const R_LG = 90; const CIRC_LG = 2 * Math.PI * R_LG;
-  const R_SM = 36; const CIRC_SM = 2 * Math.PI * R_SM;
-  const restProgress = timerTotal > 0 ? timerLeft / timerTotal : 0;
-  const restDone = timerTotal > 0 && timerLeft === 0;
 
   const allExercises = [...new Set([...PRESET_EXERCISES, ...sessions.flatMap(s => s.sets.map(e => e.exercise))])].sort();
 
@@ -150,10 +131,9 @@ function App() {
   function addSet() {
     const ex = form.exercise === "__custom__" ? customExercise.trim() : form.exercise;
     if (!ex || !form.reps || !form.weight) { showToast("Exercise, reps & weight are required"); return; }
-    const entry = { id: Date.now(), exercise: ex, sets: form.sets || "1", reps: Number(form.reps), weight: Number(form.weight), rest: form.rest, notes: form.notes };
+    const entry = { id: Date.now(), exercise: ex, sets: form.sets || "1", reps: Number(form.reps), weight: Number(form.weight), rest: form.rest, rpe: form.rpe, notes: form.notes };
     setSets(prev => [...prev, entry]);
-    if (form.rest && Number(form.rest) > 0) startRestTimer(Number(form.rest));
-    setForm(f => ({ ...f, reps: "", weight: "", notes: "" }));
+    setForm(f => ({ ...f, reps: "", weight: "", rpe: "", notes: "" }));
     showToast("Set logged ✓");
   }
 
@@ -166,7 +146,6 @@ function App() {
     setSessions(updated);
     persist(updated, user);
     setCurrentSession(null); setSets([]);
-    clearInterval(intervalRef.current); setTimerRunning(false); setTimerLeft(0); setTimerTotal(0);
     setView("history"); showToast("Session saved ✓");
   }
 
@@ -197,6 +176,8 @@ function App() {
 
   const chartColor = "#e8ff4a"; const chartColor2 = "#4af0e8";
 
+  const RPE_COLORS = { 1:"#2a4a2a", 2:"#2a4a2a", 3:"#3a5a2a", 4:"#4a6a2a", 5:"#6a7a2a", 6:"#8a7a1a", 7:"#aa6a0a", 8:"#c85010", 9:"#e03008", 10:"#ff1010" };
+
   if (authLoading) return (
     <div style={{ background: "#0d0d0d", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');`}</style>
@@ -214,7 +195,6 @@ function App() {
       `}</style>
       <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 48, letterSpacing: "0.1em", marginBottom: 6 }}>IRON LOG</div>
       <div style={{ fontSize: 10, color: "#333", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: 40 }}>Workout Tracker</div>
-
       <div style={{ width: "100%", maxWidth: 340 }}>
         <div style={{ display: "flex", marginBottom: 24, borderBottom: "1px solid #1e1e1e" }}>
           {["login","register"].map(m => (
@@ -223,7 +203,6 @@ function App() {
             </button>
           ))}
         </div>
-
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 5 }}>Email</div>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e => e.key === "Enter" && handleAuth()} />
@@ -232,13 +211,10 @@ function App() {
           <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 5 }}>Password</div>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleAuth()} />
         </div>
-
         {authError && <div style={{ fontSize: 11, color: "#ff4a4a", marginBottom: 14, textAlign: "center" }}>{authError}</div>}
-
         <button onClick={handleAuth} disabled={authBusy} style={{ width: "100%", background: "#e8ff4a", color: "#0d0d0d", border: "none", padding: "12px", fontSize: 12, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", borderRadius: "3px", cursor: "pointer", opacity: authBusy ? 0.6 : 1 }}>
           {authBusy ? "Please wait…" : authMode === "login" ? "Sign In" : "Create Account"}
         </button>
-
         <div style={{ fontSize: 10, color: "#222", marginTop: 20, textAlign: "center", letterSpacing: "0.08em" }}>Your data is private and encrypted</div>
       </div>
     </div>
@@ -268,6 +244,7 @@ function App() {
         .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #e8ff4a; color: #0d0d0d; padding: 10px 22px; border-radius: 3px; font-size: 12px; font-weight: 500; letter-spacing: 0.06em; z-index: 999; animation: fadeup 0.3s ease; }
         @keyframes fadeup { from { opacity:0; transform: translateX(-50%) translateY(8px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
         .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .set-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #1a1a1a; }
         .ex-name { font-size: 12px; font-weight: 500; color: #e8ff4a; }
         .set-meta { font-size: 11px; color: #666; }
@@ -293,6 +270,8 @@ function App() {
         .cd-input::-webkit-outer-spin-button, .cd-input::-webkit-inner-spin-button { -webkit-appearance: none; }
         .quick-cd { background: #141414; border: 1px solid #1e1e1e; color: #555; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 0; border-radius: 3px; flex: 1; text-align: center; }
         .quick-cd:hover { border-color: #333; color: #aaa; }
+        .rpe-btn { background: #1a1a1a; border: 1px solid #2a2a2a; color: #666; font-size: 11px; padding: 6px 0; border-radius: 3px; flex: 1; text-align: center; }
+        .rpe-btn.selected { color: #0d0d0d; border-color: transparent; font-weight: 500; }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.25; } }
         .done-pulse { animation: pulse 0.8s infinite; }
         @keyframes glow { 0%,100% { filter: drop-shadow(0 0 6px #e8ff4a66); } 50% { filter: drop-shadow(0 0 18px #e8ff4aaa); } }
@@ -309,7 +288,7 @@ function App() {
             {!currentSession
               ? <button className="primary-btn" onClick={startSession}>+ New Session</button>
               : <>
-                  <button className="ghost-btn" onClick={() => { setCurrentSession(null); setSets([]); clearInterval(intervalRef.current); setTimerRunning(false); setTimerLeft(0); setTimerTotal(0); }}>Discard</button>
+                  <button className="ghost-btn" onClick={() => { setCurrentSession(null); setSets([]); }}>Discard</button>
                   <button className="primary-btn" onClick={finishSession}>Save Session</button>
                 </>
             }
@@ -327,6 +306,7 @@ function App() {
 
       <div style={{ padding: "20px", maxWidth: 680, margin: "0 auto" }}>
 
+        {/* LOG */}
         {view === "log" && (
           <>
             {!currentSession ? (
@@ -337,27 +317,6 @@ function App() {
               </div>
             ) : (
               <>
-                {timerTotal > 0 && (
-                  <div className="card" style={{ display: "flex", alignItems: "center", gap: 20, padding: "16px 20px" }}>
-                    <div style={{ position: "relative", width: 88, height: 88, flexShrink: 0 }}>
-                      <svg width="88" height="88" style={{ transform: "rotate(-90deg)" }}>
-                        <circle cx="44" cy="44" r={R_SM} fill="none" stroke="#1e1e1e" strokeWidth="5" />
-                        <circle cx="44" cy="44" r={R_SM} fill="none" stroke={restDone ? "#ff4a4a" : "#e8ff4a"} strokeWidth="5"
-                          strokeDasharray={`${restProgress * CIRC_SM} ${CIRC_SM}`} strokeLinecap="round" className="ring-transition" />
-                      </svg>
-                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: restDone ? "#ff4a4a" : "#f0f0f0" }} className={restDone ? "done-pulse" : ""}>
-                        {restDone ? "GO!" : fmtTime(timerLeft)}
-                      </div>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div className="label" style={{ marginBottom: 8 }}>Rest Timer · {timerTotal}s</div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button className="timer-ctrl" onClick={toggleRestTimer}>{timerRunning ? "⏸ Pause" : "▶ Resume"}</button>
-                        <button className="timer-ctrl" onClick={resetRestTimer}>↺ Reset</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <div className="card">
                   <div style={{ fontSize: 11, color: "#555", marginBottom: 14, letterSpacing: "0.08em" }}>
                     SESSION · {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase()}
@@ -381,21 +340,43 @@ function App() {
                     <div><div className="label">Reps</div><input type="number" min="1" value={form.reps} onChange={e => setForm(f => ({ ...f, reps: e.target.value }))} placeholder="8" /></div>
                     <div><div className="label">Weight (kg/lbs)</div><input type="number" min="0" step="0.5" value={form.weight} onChange={e => setForm(f => ({ ...f, weight: e.target.value }))} placeholder="60" /></div>
                   </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <div className="label">Rest (sec)</div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                      <input type="number" min="0" value={form.rest} onChange={e => setForm(f => ({ ...f, rest: e.target.value }))} placeholder="120" style={{ flex: "1 1 70px" }} />
-                      {[60, 90, 120, 180].map(s => <button key={s} className="quick-rest" onClick={() => setForm(f => ({ ...f, rest: String(s) }))}>{s}s</button>)}
+                  <div className="grid2" style={{ marginBottom: 10 }}>
+                    <div>
+                      <div className="label">Rest (sec)</div>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <input type="number" min="0" value={form.rest} onChange={e => setForm(f => ({ ...f, rest: e.target.value }))} placeholder="120" style={{ flex: "1 1 60px" }} />
+                        {[60, 90, 120, 180].map(s => <button key={s} className="quick-rest" onClick={() => setForm(f => ({ ...f, rest: String(s) }))}>{s}s</button>)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="label">RPE (1–10)</div>
+                      <input type="number" min="1" max="10" step="0.5" value={form.rpe} onChange={e => setForm(f => ({ ...f, rpe: e.target.value }))} placeholder="7" />
                     </div>
                   </div>
+
+                  {/* RPE visual selector */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                        <button key={n} className={`rpe-btn ${form.rpe == n ? "selected" : ""}`}
+                          style={{ background: form.rpe == n ? RPE_COLORS[n] : "#1a1a1a", borderColor: form.rpe == n ? RPE_COLORS[n] : "#2a2a2a", color: form.rpe == n ? "#fff" : "#555" }}
+                          onClick={() => setForm(f => ({ ...f, rpe: form.rpe == n ? "" : String(n) }))}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#333", marginTop: 4, letterSpacing: "0.08em" }}>
+                      {form.rpe ? ["","Very Easy","Easy","Moderate","Somewhat Hard","Hard","Hard","Very Hard","Very Hard","Max Effort","Absolute Max"][Math.round(Number(form.rpe))] : "Tap to set RPE"}
+                    </div>
+                  </div>
+
                   <div style={{ marginBottom: 14 }}>
                     <div className="label">Notes</div>
                     <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. slight lower back tightness" />
                   </div>
-                  <button className="primary-btn" style={{ width: "100%" }} onClick={addSet}>
-                    Log Set{form.rest ? ` & Start ${form.rest}s Timer` : ""}
-                  </button>
+                  <button className="primary-btn" style={{ width: "100%" }} onClick={addSet}>Log Set</button>
                 </div>
+
                 {sets.length > 0 && (
                   <div className="card">
                     <div className="label" style={{ marginBottom: 10 }}>This Session ({sets.length} entries)</div>
@@ -404,7 +385,11 @@ function App() {
                         <div style={{ fontSize: 10, color: "#333", width: 18 }}>{i + 1}</div>
                         <div style={{ flex: 1 }}>
                           <div className="ex-name">{s.exercise}</div>
-                          <div className="set-meta">{s.sets}×{s.reps} @ {s.weight}{s.rest ? ` · ${s.rest}s rest` : ""}</div>
+                          <div className="set-meta">
+                            {s.sets}×{s.reps} @ {s.weight}
+                            {s.rest ? ` · ${s.rest}s rest` : ""}
+                            {s.rpe ? <span style={{ marginLeft: 6, background: RPE_COLORS[Math.round(Number(s.rpe))], color: "#fff", fontSize: 9, padding: "1px 6px", borderRadius: 2 }}>RPE {s.rpe}</span> : ""}
+                          </div>
                           {s.notes && <div style={{ fontSize: 10, color: "#444", marginTop: 2 }}>{s.notes}</div>}
                         </div>
                         <button className="danger-btn" onClick={() => removeSet(s.id)}>×</button>
@@ -417,6 +402,7 @@ function App() {
           </>
         )}
 
+        {/* TIMER */}
         {view === "timer" && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 32 }}>
             <div style={{ position: "relative", width: 220, height: 220, marginBottom: 32 }}>
@@ -470,6 +456,7 @@ function App() {
           </div>
         )}
 
+        {/* HISTORY */}
         {view === "history" && (
           sessions.length === 0
             ? <div style={{ textAlign: "center", padding: "60px 20px", color: "#333", fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase" }}>No sessions yet</div>
@@ -494,6 +481,7 @@ function App() {
               })
         )}
 
+        {/* GRAPHS */}
         {view === "graphs" && (
           <>
             <div className="card" style={{ marginBottom: 20 }}>
