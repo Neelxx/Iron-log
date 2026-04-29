@@ -31,13 +31,11 @@ function App() {
   const [graphType, setGraphType] = useState("weight");
   const [toast, setToast] = useState("");
 
-  // Rest timer
   const [timerTotal, setTimerTotal] = useState(0);
   const [timerLeft, setTimerLeft] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const intervalRef = useRef(null);
 
-  // Independent countdown
   const [cdMinutes, setCdMinutes] = useState("");
   const [cdSeconds, setCdSeconds] = useState("");
   const [cdTotal, setCdTotal] = useState(0);
@@ -46,66 +44,78 @@ function App() {
   const [cdStarted, setCdStarted] = useState(false);
   const cdRef = useRef(null);
 
-  // Auth listener + handle redirect result
+  const loadSessions = async (uid) => {
+    try {
+      const ref = doc(db, "users", uid, "data", "sessions");
+      const snap = await getDoc(ref);
+      if (snap.exists()) setSessions(snap.data().list || []);
+    } catch {}
+  };
+
   useEffect(() => {
     getRedirectResult(auth).then(async (result) => {
-      if (result?.user) {
-        try {
-          const ref = doc(db, "users", result.user.uid, "data", "sessions");
-          const snap = await getDoc(ref);
-          if (snap.exists()) setSessions(snap.data().list || []);
-        } catch {}
+      if (result && result.user) {
+        await loadSessions(result.user.uid);
       }
     }).catch(() => {});
 
-  const unsub = onAuthStateChanged(auth, async (u) => {
-    setUser(u);
-    setAuthLoading(false);
-    if (u) {
-      try {
-        const ref = doc(db, "users", u.uid, "data", "sessions");
-        const snap = await getDoc(ref);
-        if (snap.exists()) setSessions(snap.data().list || []);
-      } catch {}
-    } else {
-      setSessions([]);
-    }
-  });
-  return unsub;
-}, []);
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      if (u) {
+        await loadSessions(u.uid);
+      } else {
+        setSessions([]);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const persist = useCallback(async (s, u) => {
+    if (!u) return;
+    try {
+      const ref = doc(db, "users", u.uid, "data", "sessions");
+      await setDoc(ref, { list: s });
+    } catch {}
+  }, []);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
   async function handleLogin() {
     try { await signInWithRedirect(auth, provider); } catch (e) { console.error(e); }
   }
+
   async function handleLogout() {
     try { await signOut(auth); setSessions([]); } catch {}
   }
 
-  // Rest timer tick
   useEffect(() => {
     if (timerRunning && timerLeft > 0) {
       intervalRef.current = setInterval(() => {
-        setTimerLeft(t => { if (t <= 1) { clearInterval(intervalRef.current); setTimerRunning(false); return 0; } return t - 1; });
+        setTimerLeft(t => {
+          if (t <= 1) { clearInterval(intervalRef.current); setTimerRunning(false); return 0; }
+          return t - 1;
+        });
       }, 1000);
     }
     return () => clearInterval(intervalRef.current);
-  }, [timerRunning]);
+  }, [timerRunning]); // eslint-disable-line
 
   function startRestTimer(seconds) { clearInterval(intervalRef.current); setTimerTotal(seconds); setTimerLeft(seconds); setTimerRunning(true); }
   function toggleRestTimer() { if (timerLeft === 0) return; setTimerRunning(r => !r); }
   function resetRestTimer() { clearInterval(intervalRef.current); setTimerRunning(false); setTimerLeft(timerTotal); }
 
-  // Countdown tick
   useEffect(() => {
     if (cdRunning && cdLeft > 0) {
       cdRef.current = setInterval(() => {
-        setCdLeft(t => { if (t <= 1) { clearInterval(cdRef.current); setCdRunning(false); return 0; } return t - 1; });
+        setCdLeft(t => {
+          if (t <= 1) { clearInterval(cdRef.current); setCdRunning(false); return 0; }
+          return t - 1;
+        });
       }, 1000);
     }
     return () => clearInterval(cdRef.current);
-  }, [cdRunning]);
+  }, [cdRunning]); // eslint-disable-line
 
   function cdStart() {
     const total = (parseInt(cdMinutes) || 0) * 60 + (parseInt(cdSeconds) || 0);
@@ -236,7 +246,6 @@ function App() {
         .session-ex { font-size: 12px; color: #ccc; margin-bottom: 2px; }
         .volume-pill { display: inline-block; background: #1a1a1a; color: #666; font-size: 10px; padding: 2px 8px; border-radius: 10px; }
         .header-title { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 0.08em; color: #f0f0f0; line-height: 1; }
-        .header-sub { font-size: 10px; color: #333; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px; }
         .ring-transition { transition: stroke-dasharray 0.9s linear; }
         .timer-ctrl { background: none; border: 1px solid #2a2a2a; color: #aaa; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 18px; border-radius: 3px; }
         .timer-ctrl:hover { border-color: #555; color: #ddd; }
