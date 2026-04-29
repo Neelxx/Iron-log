@@ -4,7 +4,7 @@ import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCmAHP4o7jV3th2sLbdemCRO1aZyGNYn7g",
-  authDomain: "iron-log-snowy.vercel.app", 
+  authDomain: "iron-log-9903d.firebaseapp.com",
   databaseURL: "https://iron-log-9903d-default-rtdb.firebaseio.com",
   projectId: "iron-log-9903d",
   storageBucket: "iron-log-9903d.firebasestorage.app",
