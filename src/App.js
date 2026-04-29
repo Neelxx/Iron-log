@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { auth, provider, db } from "./firebase";
-import { signInWithRedirect, signOut, onAuthStateChanged, getRedirectResult } from "firebase/auth";
+import { signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged, getRedirectResult } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 
 const PRESET_EXERCISES = [
@@ -81,9 +81,16 @@ function App() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
-  async function handleLogin() {
-    try { await signInWithRedirect(auth, provider); } catch (e) { console.error(e); }
-  }
+	async function handleLogin() {
+	  try {
+		const { signInWithPopup } = await import("firebase/auth");
+		await signInWithPopup(auth, provider);
+	  } catch (e) {
+		if (e.code === 'auth/popup-blocked') {
+		  try { await signInWithRedirect(auth, provider); } catch {}
+		}
+	  }
+	}
 
   async function handleLogout() {
     try { await signOut(auth); setSessions([]); } catch {}
