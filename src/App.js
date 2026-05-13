@@ -18,6 +18,41 @@ function getTodayISO() { return new Date().toISOString().split("T")[0]; }
 function pad(n) { return String(n).padStart(2, "0"); }
 function fmtTime(sec) { return `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`; }
 
+const MEASURE_FIELDS = [
+  { key: "weight",          label: "Weight",          unit: "kg",  group: "body" },
+  { key: "height",          label: "Height",          unit: "cm",  group: "body" },
+  { key: "neck",            label: "Neck",            unit: "cm",  group: "body" },
+  { key: "shoulder",        label: "Shoulder",        unit: "cm",  group: "body" },
+  { key: "waist",           label: "Waist",           unit: "cm",  group: "body" },
+  { key: "hips",            label: "Hips",            unit: "cm",  group: "body" },
+  { key: "bicepL",          label: "Bicep (L)",       unit: "cm",  group: "left" },
+  { key: "forearmL",        label: "Forearm (L)",     unit: "cm",  group: "left" },
+  { key: "thighL",          label: "Thigh (L)",       unit: "cm",  group: "left" },
+  { key: "calfL",           label: "Calf (L)",        unit: "cm",  group: "left" },
+  { key: "bicepR",          label: "Bicep (R)",       unit: "cm",  group: "right" },
+  { key: "forearmR",        label: "Forearm (R)",     unit: "cm",  group: "right" },
+  { key: "thighR",          label: "Thigh (R)",       unit: "cm",  group: "right" },
+  { key: "calfR",           label: "Calf (R)",        unit: "cm",  group: "right" },
+];
+
+const EMPTY_MEASURE = Object.fromEntries(MEASURE_FIELDS.map(f => [f.key, ""]));
+
+function exportMeasurementsCSV(measurements) {
+  const headers = ["Date/Time", ...MEASURE_FIELDS.map(f => `${f.label} (${f.unit})`)];
+  const rows = measurements.map(m => [
+    m.datetime,
+    ...MEASURE_FIELDS.map(f => m[f.key] !== undefined && m[f.key] !== "" ? m[f.key] : "")
+  ]);
+  const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `iron-log-measurements-${getTodayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -37,6 +72,12 @@ function App() {
   const [graphType, setGraphType] = useState("weight");
   const [toast, setToast] = useState("");
 
+  // Measurements state
+  const [measurements, setMeasurements] = useState([]);
+  const [measureForm, setMeasureForm] = useState(EMPTY_MEASURE);
+  const [measureBusy, setMeasureBusy] = useState(false);
+  const [measureView, setMeasureView] = useState("form"); // "form" | "history"
+
   // Independent countdown timer only
   const [cdMinutes, setCdMinutes] = useState("");
   const [cdSeconds, setCdSeconds] = useState("");
@@ -54,12 +95,25 @@ function App() {
     } catch {}
   };
 
+  const loadMeasurements = async (uid) => {
+    try {
+      const ref = doc(db, "users", uid, "data", "measurements");
+      const snap = await getDoc(ref);
+      if (snap.exists()) setMeasurements(snap.data().list || []);
+    } catch {}
+  };
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setAuthLoading(false);
-      if (u) await loadSessions(u.uid);
-      else setSessions([]);
+      if (u) {
+        await loadSessions(u.uid);
+        await loadMeasurements(u.uid);
+      } else {
+        setSessions([]);
+        setMeasurements([]);
+      }
     });
     return unsub;
   }, []);
@@ -69,6 +123,14 @@ function App() {
     try {
       const ref = doc(db, "users", u.uid, "data", "sessions");
       await setDoc(ref, { list: s });
+    } catch {}
+  }, []);
+
+  const persistMeasurements = useCallback(async (list, u) => {
+    if (!u) return;
+    try {
+      const ref = doc(db, "users", u.uid, "data", "measurements");
+      await setDoc(ref, { list });
     } catch {}
   }, []);
 
@@ -97,7 +159,35 @@ function App() {
   }
 
   async function handleLogout() {
-    try { await signOut(auth); setSessions([]); } catch {}
+    try { await signOut(auth); setSessions([]); setMeasurements([]); } catch {}
+  }
+
+  async function saveMeasurement() {
+    const hasAny = MEASURE_FIELDS.some(f => measureForm[f.key] !== "");
+    if (!hasAny) { showToast("Enter at least one measurement"); return; }
+    setMeasureBusy(true);
+    const entry = {
+      id: Date.now(),
+      datetime: new Date().toLocaleString("en-GB", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      }),
+      ...Object.fromEntries(MEASURE_FIELDS.map(f => [f.key, measureForm[f.key] !== "" ? Number(measureForm[f.key]) : ""]))
+    };
+    const updated = [entry, ...measurements];
+    setMeasurements(updated);
+    await persistMeasurements(updated, user);
+    setMeasureForm(EMPTY_MEASURE);
+    setMeasureBusy(false);
+    setMeasureView("history");
+    showToast("Measurements saved ✓");
+  }
+
+  function deleteMeasurement(id) {
+    const updated = measurements.filter(m => m.id !== id);
+    setMeasurements(updated);
+    persistMeasurements(updated, user);
+    showToast("Entry deleted");
   }
 
   // Countdown timer tick
@@ -276,6 +366,24 @@ function App() {
         .done-pulse { animation: pulse 0.8s infinite; }
         @keyframes glow { 0%,100% { filter: drop-shadow(0 0 6px #e8ff4a66); } 50% { filter: drop-shadow(0 0 18px #e8ff4aaa); } }
         .ring-glow { animation: glow 1.6s ease-in-out infinite; }
+
+        /* Measurements */
+        .measure-sub-btn { background: none; border: none; color: #555; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 14px; border-bottom: 1px solid transparent; }
+        .measure-sub-btn.active { color: #4af0e8; border-bottom: 1px solid #4af0e8; }
+        .measure-sub-btn:hover { color: #ddd; }
+        .measure-group-label { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: #333; margin: 18px 0 10px; border-bottom: 1px solid #1a1a1a; padding-bottom: 6px; }
+        .measure-field-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .measure-field-label { font-size: 11px; color: #666; width: 110px; flex-shrink: 0; letter-spacing: 0.04em; }
+        .measure-field-unit { font-size: 10px; color: #333; width: 24px; flex-shrink: 0; }
+        .measure-history-row { padding: 12px 0; border-bottom: 1px solid #1a1a1a; }
+        .measure-history-date { font-size: 10px; color: #555; letter-spacing: 0.08em; margin-bottom: 8px; }
+        .measure-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .measure-chip { background: #1a1a1a; border: 1px solid #222; border-radius: 3px; padding: 3px 8px; font-size: 10px; }
+        .measure-chip-label { color: #444; }
+        .measure-chip-val { color: #4af0e8; margin-left: 4px; }
+        .measure-chip-unit { color: #333; font-size: 9px; margin-left: 1px; }
+        .csv-btn { background: none; border: 1px solid #2a2a2a; color: #4af0e8; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 18px; border-radius: 3px; }
+        .csv-btn:hover { border-color: #4af0e8; background: #4af0e811; }
       `}</style>
 
       <div style={{ borderBottom: "1px solid #1a1a1a", padding: "18px 20px 0" }}>
@@ -285,20 +393,21 @@ function App() {
             <div style={{ fontSize: 10, color: "#444", letterSpacing: "0.1em", marginTop: 2 }}>{user.email}</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {!currentSession
-              ? <button className="primary-btn" onClick={startSession}>+ New Session</button>
-              : <>
-                  <button className="ghost-btn" onClick={() => { setCurrentSession(null); setSets([]); }}>Discard</button>
-                  <button className="primary-btn" onClick={finishSession}>Save Session</button>
-                </>
-            }
+            {view !== "measure" && (
+              !currentSession
+                ? <button className="primary-btn" onClick={startSession}>+ New Session</button>
+                : <>
+                    <button className="ghost-btn" onClick={() => { setCurrentSession(null); setSets([]); }}>Discard</button>
+                    <button className="primary-btn" onClick={finishSession}>Save Session</button>
+                  </>
+            )}
             <button className="ghost-btn" onClick={handleLogout} style={{ fontSize: 10 }}>Sign out</button>
           </div>
         </div>
         <div>
-          {["log","timer","history","graphs"].map(t => (
+          {["log","timer","history","graphs","measure"].map(t => (
             <button key={t} className={`nav-btn ${view === t ? "active" : ""}`} onClick={() => setView(t)}>
-              {t === "log" ? "Log" : t === "timer" ? "Timer" : t === "history" ? "History" : "Graphs"}
+              {t === "log" ? "Log" : t === "timer" ? "Timer" : t === "history" ? "History" : t === "graphs" ? "Graphs" : "Measure"}
             </button>
           ))}
         </div>
@@ -353,8 +462,6 @@ function App() {
                       <input type="number" min="1" max="10" step="0.5" value={form.rpe} onChange={e => setForm(f => ({ ...f, rpe: e.target.value }))} placeholder="7" />
                     </div>
                   </div>
-
-                  {/* RPE visual selector */}
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", gap: 4 }}>
                       {[1,2,3,4,5,6,7,8,9,10].map(n => (
@@ -369,14 +476,12 @@ function App() {
                       {form.rpe ? ["","Very Easy","Easy","Moderate","Somewhat Hard","Hard","Hard","Very Hard","Very Hard","Max Effort","Absolute Max"][Math.round(Number(form.rpe))] : "Tap to set RPE"}
                     </div>
                   </div>
-
                   <div style={{ marginBottom: 14 }}>
                     <div className="label">Notes</div>
                     <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. slight lower back tightness" />
                   </div>
                   <button className="primary-btn" style={{ width: "100%" }} onClick={addSet}>Log Set</button>
                 </div>
-
                 {sets.length > 0 && (
                   <div className="card">
                     <div className="label" style={{ marginBottom: 10 }}>This Session ({sets.length} entries)</div>
@@ -554,6 +659,133 @@ function App() {
             </div>
           </>
         )}
+
+        {/* ─── MEASUREMENTS ─── */}
+        {view === "measure" && (
+          <>
+            {/* Sub-nav */}
+            <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", marginBottom: 20 }}>
+              <button className={`measure-sub-btn ${measureView === "form" ? "active" : ""}`} onClick={() => setMeasureView("form")}>
+                + Log Entry
+              </button>
+              <button className={`measure-sub-btn ${measureView === "history" ? "active" : ""}`} onClick={() => setMeasureView("history")}>
+                History {measurements.length > 0 && `(${measurements.length})`}
+              </button>
+              {measurements.length > 0 && (
+                <button className="csv-btn" style={{ marginLeft: "auto", marginBottom: 4 }} onClick={() => exportMeasurementsCSV(measurements)}>
+                  ↓ Export CSV
+                </button>
+              )}
+            </div>
+
+            {/* FORM */}
+            {measureView === "form" && (
+              <div className="card">
+                <div style={{ fontSize: 11, color: "#555", marginBottom: 4, letterSpacing: "0.08em" }}>
+                  {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).toUpperCase()}
+                </div>
+                <div style={{ fontSize: 10, color: "#333", marginBottom: 16, letterSpacing: "0.06em" }}>
+                  {new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+
+                {/* Body */}
+                <div className="measure-group-label">Body</div>
+                {MEASURE_FIELDS.filter(f => f.group === "body").map(f => (
+                  <div key={f.key} className="measure-field-row">
+                    <span className="measure-field-label">{f.label}</span>
+                    <input
+                      type="number" min="0" step="0.1"
+                      value={measureForm[f.key]}
+                      onChange={e => setMeasureForm(p => ({ ...p, [f.key]: e.target.value }))}
+                      placeholder="—"
+                      style={{ flex: 1 }}
+                    />
+                    <span className="measure-field-unit">{f.unit}</span>
+                  </div>
+                ))}
+
+                {/* Left / Right side by side */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 4 }}>
+                  <div>
+                    <div className="measure-group-label" style={{ marginTop: 10 }}>Left</div>
+                    {MEASURE_FIELDS.filter(f => f.group === "left").map(f => (
+                      <div key={f.key} className="measure-field-row" style={{ gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "#666", flex: 1, letterSpacing: "0.04em" }}>
+                          {f.label.replace(" (L)", "")}
+                        </span>
+                        <input
+                          type="number" min="0" step="0.1"
+                          value={measureForm[f.key]}
+                          onChange={e => setMeasureForm(p => ({ ...p, [f.key]: e.target.value }))}
+                          placeholder="—"
+                          style={{ width: 72 }}
+                        />
+                        <span className="measure-field-unit">{f.unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="measure-group-label" style={{ marginTop: 10 }}>Right</div>
+                    {MEASURE_FIELDS.filter(f => f.group === "right").map(f => (
+                      <div key={f.key} className="measure-field-row" style={{ gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "#666", flex: 1, letterSpacing: "0.04em" }}>
+                          {f.label.replace(" (R)", "")}
+                        </span>
+                        <input
+                          type="number" min="0" step="0.1"
+                          value={measureForm[f.key]}
+                          onChange={e => setMeasureForm(p => ({ ...p, [f.key]: e.target.value }))}
+                          placeholder="—"
+                          style={{ width: 72 }}
+                        />
+                        <span className="measure-field-unit">{f.unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  className="primary-btn"
+                  style={{ width: "100%", marginTop: 20, background: "#4af0e8", color: "#0d0d0d" }}
+                  disabled={measureBusy}
+                  onClick={saveMeasurement}
+                >
+                  {measureBusy ? "Saving…" : "Save Measurements"}
+                </button>
+              </div>
+            )}
+
+            {/* HISTORY */}
+            {measureView === "history" && (
+              measurements.length === 0
+                ? (
+                  <div style={{ textAlign: "center", padding: "60px 20px", color: "#333" }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>◉</div>
+                    <div style={{ fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase" }}>No measurements yet</div>
+                    <div style={{ fontSize: 11, color: "#222", marginTop: 6 }}>Log your first entry to get started</div>
+                  </div>
+                )
+                : measurements.map(m => (
+                  <div key={m.id} className="measure-history-row">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div className="measure-history-date">{m.datetime}</div>
+                      <button className="danger-btn" onClick={() => deleteMeasurement(m.id)} style={{ fontSize: 14 }}>×</button>
+                    </div>
+                    <div className="measure-chips">
+                      {MEASURE_FIELDS.map(f => m[f.key] !== "" && m[f.key] !== undefined ? (
+                        <div key={f.key} className="measure-chip">
+                          <span className="measure-chip-label">{f.label}</span>
+                          <span className="measure-chip-val">{m[f.key]}</span>
+                          <span className="measure-chip-unit">{f.unit}</span>
+                        </div>
+                      ) : null)}
+                    </div>
+                  </div>
+                ))
+            )}
+          </>
+        )}
+
       </div>
 
       {toast && <div className="toast">{toast}</div>}
